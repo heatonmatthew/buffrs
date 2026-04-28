@@ -179,11 +179,6 @@ impl LockedPackage {
         }
     }
 
-    /// Returns true if the locked version satisfies the given requirement
-    pub fn satisfies_requirement(&self, req: &VersionReq) -> bool {
-        req.matches(&self.version)
-    }
-
     /// Validates if another LockedPackage matches this one
     pub fn validate(&self, package: &Package) -> miette::Result<()> {
         let digest: Digest = DigestAlgorithm::SHA256.digest(&package.tgz);
