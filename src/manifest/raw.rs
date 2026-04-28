@@ -79,7 +79,7 @@ impl RawManifest {
 
     pub(crate) fn dependencies_as_vec(&self) -> Option<Vec<Dependency>> {
         self.dependencies().map(|deps| {
-            let mut out: Vec<Dependency> = deps
+            let mut out: Vec<_> = deps
                 .iter()
                 .map(|(package, manifest)| Dependency {
                     package: package.to_owned(),
