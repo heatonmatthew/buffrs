@@ -1,8 +1,6 @@
 // (c) Copyright 2025 Helsing GmbH. All rights reserved.
-
-// thiserror v2 generates `unused_assignments` in Display impls for enum
-// variants whose fields are referenced only via free-function positional
-// arguments in `#[error("...", free_fn(.field))]`.
+// thiserror v2 generates unused_assignments in Display impls when free-function
+// positional format args reference fields via .field syntax.
 #![allow(unused_assignments)]
 
 use std::{
