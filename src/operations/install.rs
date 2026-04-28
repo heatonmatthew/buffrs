@@ -331,7 +331,7 @@ mod utils {
         if ctx.network_mode == NetworkMode::Offline {
             bail!(DependencyError::Offline {
                 name: package_name.clone(),
-                version: version.clone(),
+                requirements: vec![version.clone()],
             });
         }
 

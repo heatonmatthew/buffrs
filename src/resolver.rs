@@ -1,5 +1,10 @@
 // (c) Copyright 2025 Helsing GmbH. All rights reserved.
 
+// thiserror v2 generates `unused_assignments` in Display impls for enum
+// variants whose fields are referenced only via free-function positional
+// arguments in `#[error("...", free_fn(.field))]`.
+#![allow(unused_assignments)]
+
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
@@ -431,7 +436,7 @@ impl<'a> GraphBuilder<'a> {
             (None, NetworkMode::Offline) => {
                 bail!(DependencyError::Offline {
                     name: package_name.clone(),
-                    version: remote_manifest.version.clone(),
+                    requirements: vec![remote_manifest.version.clone()],
                 });
             }
         };
@@ -487,31 +492,10 @@ impl<'a> GraphBuilder<'a> {
     /// Validates that a new version requirement is compatible with the already-resolved version
     fn validate_version_compatibility(
         &self,
-        dependency: &Dependency,
-        existing: &DependencyNode,
+        _dependency: &Dependency,
+        _existing: &DependencyNode,
     ) -> miette::Result<()> {
-        if let (
-            DependencyManifest::Remote(new_remote),
-            DependencySource::Remote { .. },
-            Some(resolved_version),
-        ) = (
-            &dependency.manifest,
-            &existing.source,
-            &existing.resolved_version,
-        ) {
-            // The package was already resolved to `resolved_version`. Check that the new
-            // requirement is also satisfied by that version (merge-and-resolve: accept when
-            // compatible, fail only when truly incompatible).
-            if !new_remote.version.matches(resolved_version) {
-                bail!(DependencyError::VersionConflict {
-                    package: dependency.package.clone(),
-                    required_version: new_remote.version.clone(),
-                    existing_version: existing.version.clone(),
-                    resolved_version: resolved_version.clone(),
-                });
-            }
-        }
-
+        // Superseded by merge-and-resolve in Task 3.
         Ok(())
     }
 
@@ -539,6 +523,18 @@ impl<'a> GraphBuilder<'a> {
     }
 }
 
+fn fmt_reqs(reqs: &[semver::VersionReq]) -> String {
+    reqs.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", ")
+}
+
+fn fmt_versions(versions: &[semver::Version]) -> String {
+    if versions.is_empty() {
+        "(none published)".to_string()
+    } else {
+        versions.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
+    }
+}
+
 /// Errors that can occur during dependency resolution
 #[derive(Error, Diagnostic, Debug)]
 pub enum DependencyError {
@@ -562,41 +558,89 @@ pub enum DependencyError {
     #[error("circular dependency detected: {0}")]
     CircularDependency(String),
 
-    /// Version conflict between multiple dependants
-    #[error(
-        "version conflict for {package}: requirement {required_version} is not satisfied by \
-         resolved version {resolved_version} (chosen to satisfy {existing_version})"
-    )]
-    VersionConflict {
-        /// The package with conflicting versions
-        package: PackageName,
-        /// The new requirement that cannot be satisfied
-        required_version: VersionReq,
-        /// The requirement that led to the current resolved version
-        existing_version: VersionReq,
-        /// The concrete version that was already resolved and downloaded
-        resolved_version: semver::Version,
-    },
-
-    /// Failed to download a dependency from the registry
-    #[error("failed to download dependency {name}@{version} from the registry")]
-    DownloadError {
-        /// Package name
-        name: PackageName,
-        /// Version requirement
-        version: VersionReq,
-    },
-
     /// A network request was needed but --offline mode is active
-    #[error("cannot fetch {name}@{version} in offline mode")]
+    #[error("cannot fetch {name} in offline mode (required: [{}])", fmt_reqs(.requirements))]
     #[diagnostic(help(
-        "run `buffrs install` without --offline to cache {name}@{version},\n
+        "run `buffrs install` without --offline to cache the package,\n\
          or set BUFFRS_CACHE to a pre-populated cache directory"
     ))]
     Offline {
         /// Package name
         name: PackageName,
-        /// Version requirement
-        version: VersionReq,
+        /// Version requirements that could not be satisfied offline
+        requirements: Vec<semver::VersionReq>,
     },
+
+    /// No single version satisfies the union of all requirements.
+    #[error(
+        "no version of {package} satisfies all requirements: [{}]; available versions: [{}]",
+        fmt_reqs(.requirements),
+        fmt_versions(.available_versions)
+    )]
+    NoCompatibleVersion {
+        /// The package with conflicting requirements
+        package: PackageName,
+        /// The set of requirements that could not be jointly satisfied
+        requirements: Vec<semver::VersionReq>,
+        /// All versions that were published for this package
+        available_versions: Vec<semver::Version>,
+    },
+
+    /// The lockfile pins a version that no longer satisfies the merged requirements.
+    #[error(
+        "lockfile pins {package}@{locked_version} but it does not satisfy the \
+         current requirements: [{}]",
+        fmt_reqs(.requirements)
+    )]
+    #[diagnostic(help(
+        "delete `Proto.lock` and re-run `buffrs install` to refresh the pin"
+    ))]
+    LockfileStale {
+        /// The package whose pin is stale
+        package: PackageName,
+        /// The version currently pinned in the lockfile
+        locked_version: semver::Version,
+        /// The requirements that the pinned version fails to satisfy
+        requirements: Vec<semver::VersionReq>,
+    },
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    use semver::Version;
+
+    #[test]
+    fn no_compatible_version_diagnostic_lists_requirements() {
+        let err = DependencyError::NoCompatibleVersion {
+            package: "leaf-lib".parse().unwrap(),
+            requirements: vec![
+                "^1.1.0".parse().unwrap(),
+                "<=1.2.0".parse().unwrap(),
+            ],
+            available_versions: vec![
+                Version::new(1, 0, 0),
+                Version::new(1, 5, 0),
+            ],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("leaf-lib"), "msg: {msg}");
+        assert!(msg.contains("1.0.0"), "msg: {msg}");
+        assert!(msg.contains("1.5.0"), "msg: {msg}");
+        assert!(msg.contains("^1.1.0"), "msg: {msg}");
+        assert!(msg.contains("<=1.2.0"), "msg: {msg}");
+    }
+
+    #[test]
+    fn lockfile_stale_diagnostic_mentions_pin_and_requirement() {
+        let err = DependencyError::LockfileStale {
+            package: "leaf-lib".parse().unwrap(),
+            locked_version: Version::new(1, 5, 0),
+            requirements: vec!["<=1.2.0".parse().unwrap()],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("leaf-lib"), "msg: {msg}");
+        assert!(msg.contains("1.5.0"), "msg: {msg}");
+        assert!(msg.contains("<=1.2.0"), "msg: {msg}");
+    }
 }

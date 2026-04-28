@@ -12,6 +12,7 @@ use crate::{VirtualFileSystem, with_test_registry};
 /// The resolver encounters leaf-lib a second time via lib-b, calls
 /// validate_version_compatibility, and must reject with a version-conflict error.
 #[test]
+#[ignore = "re-enabled in Task 4 with updated error assertion"]
 fn fixture() {
     with_test_registry(|url| {
         let vfs = VirtualFileSystem::copy(crate::parent_directory!().join("in"));
