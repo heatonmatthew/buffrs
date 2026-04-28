@@ -64,9 +64,14 @@ development):
 path = "../my-lib"
 ```
 
+The `path` field is a relative path from the manifest file to the dependency's
+root directory (the directory containing the dependency's `Proto.toml`).
+
 Local dependencies do not have a version requirement — the package at that
 path is used as-is. They cannot be mixed with a remote entry for the same
 package name.
+
+See [Local Dependencies](../guide/local-dependencies.md) for more information.
 
 ## The lockfile
 
