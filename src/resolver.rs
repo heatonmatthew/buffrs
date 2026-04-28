@@ -7,7 +7,7 @@ use std::{
 
 use async_recursion::async_recursion;
 use miette::{Context as _, Diagnostic, bail};
-use semver::VersionReq;
+use semver::{Version, VersionReq};
 use thiserror::Error;
 
 use crate::{
@@ -54,7 +54,7 @@ pub struct DependencyNode {
     /// Version requirement from the manifest
     pub version: VersionReq,
     /// The concrete version that was resolved and downloaded (None for local deps)
-    pub resolved_version: Option<semver::Version>,
+    pub resolved_version: Option<Version>,
 }
 
 /// Maps a package name to metadata describing the package
