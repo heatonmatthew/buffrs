@@ -8,6 +8,7 @@ mod range_cascade_resolution;
 mod range_compatible_diamond;
 mod range_downgrade_diamond;
 mod range_incompatible_diamond;
+mod range_lockfile_reresolution;
 mod range_multi_level_tree;
 mod range_tilde_resolution;
 
