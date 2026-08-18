@@ -8,13 +8,11 @@ use crate::{VirtualFileSystem, with_test_registry};
 ///   pkg1 --(^1.0)--> lib-a --(^1.0.0)--> leaf-lib
 ///   pkg1 --(^1.0)--> lib-b --(>=1.2.0)--> leaf-lib
 ///
-/// leaf-lib is available at v1.0.0 and v1.5.0. The resolver encounters
-/// leaf-lib first via lib-a (resolves to v1.5.0 for ^1.0.0), then
-/// re-encounters it via lib-b and calls validate_version_compatibility,
-/// which should accept v1.5.0 because it satisfies >=1.2.0. Install must
-/// succeed and the lockfile must pin leaf-lib at v1.5.0 exactly once.
+/// leaf-lib is available at v1.0.0 and v1.5.0. The resolver merges both
+/// requirements before picking, and v1.5.0 is the highest version satisfying
+/// ^1.0.0 and >=1.2.0 together. Install must succeed and the lockfile must
+/// pin leaf-lib at v1.5.0 exactly once.
 #[test]
-#[ignore = "re-enabled in Task 3 after worklist refactor"]
 fn fixture() {
     with_test_registry(|url| {
         let vfs = VirtualFileSystem::copy(crate::parent_directory!().join("in"));

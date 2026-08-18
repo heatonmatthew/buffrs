@@ -210,6 +210,29 @@ impl Artifactory {
             })
     }
 
+    /// Like [`Artifactory::resolve_version`], but requires *all* of `reqs` to match.
+    ///
+    /// Returns the chosen version alongside the full descending version list, so the
+    /// caller can attach `available_versions` to a `NoCompatibleVersion` diagnostic.
+    /// A registry failure is an `Err`; "nothing satisfies the constraints" is
+    /// `Ok((None, versions))`.
+    pub async fn resolve_version_for_all(
+        &self,
+        repository: String,
+        name: PackageName,
+        reqs: &[VersionReq],
+    ) -> miette::Result<(Option<Version>, Vec<Version>)> {
+        let versions = self.list_versions(repository, name).await?;
+
+        // `list_versions` is sorted descending, so the first match is the highest.
+        let chosen = versions
+            .iter()
+            .find(|v| reqs.iter().all(|r| r.matches(v)))
+            .cloned();
+
+        Ok((chosen, versions))
+    }
+
     /// Retrieves the latest version of a package by querying artifactory
     pub async fn get_latest_version(
         &self,
