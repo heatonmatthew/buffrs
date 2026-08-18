@@ -583,24 +583,6 @@ pub enum DependencyError {
         /// All versions that were published for this package
         available_versions: Vec<semver::Version>,
     },
-
-    /// The lockfile pins a version that no longer satisfies the merged requirements.
-    #[error(
-        "lockfile pins {package}@{locked_version} but it does not satisfy the \
-         current requirements: [{}]",
-        fmt_reqs(.requirements)
-    )]
-    #[diagnostic(help(
-        "delete `Proto.lock` and re-run `buffrs install` to refresh the pin"
-    ))]
-    LockfileStale {
-        /// The package whose pin is stale
-        package: PackageName,
-        /// The version currently pinned in the lockfile
-        locked_version: semver::Version,
-        /// The requirements that the pinned version fails to satisfy
-        requirements: Vec<semver::VersionReq>,
-    },
 }
 
 #[cfg(test)]
@@ -626,19 +608,6 @@ mod error_tests {
         assert!(msg.contains("1.0.0"), "msg: {msg}");
         assert!(msg.contains("1.5.0"), "msg: {msg}");
         assert!(msg.contains("^1.1.0"), "msg: {msg}");
-        assert!(msg.contains("<=1.2.0"), "msg: {msg}");
-    }
-
-    #[test]
-    fn lockfile_stale_diagnostic_mentions_pin_and_requirement() {
-        let err = DependencyError::LockfileStale {
-            package: "leaf-lib".parse().unwrap(),
-            locked_version: Version::new(1, 5, 0),
-            requirements: vec!["<=1.2.0".parse().unwrap()],
-        };
-        let msg = err.to_string();
-        assert!(msg.contains("leaf-lib"), "msg: {msg}");
-        assert!(msg.contains("1.5.0"), "msg: {msg}");
         assert!(msg.contains("<=1.2.0"), "msg: {msg}");
     }
 }
