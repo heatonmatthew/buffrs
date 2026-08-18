@@ -4,6 +4,7 @@ mod lockfile_diamond_dependencies;
 mod lockfile_multiple_versions;
 mod lockfile_transitive;
 mod range_caret_resolution;
+mod range_cascade_resolution;
 mod range_compatible_diamond;
 mod range_downgrade_diamond;
 mod range_incompatible_diamond;

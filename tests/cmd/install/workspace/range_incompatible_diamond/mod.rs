@@ -8,11 +8,10 @@ use crate::{VirtualFileSystem, with_test_registry};
 ///   pkg1 --(^1.0)--> lib-a --(^1.0.0)--> leaf-lib  (resolves to v1.0.0)
 ///   pkg1 --(^1.0)--> lib-b --(^2.0.0)--> leaf-lib  (requires v2.x — conflict)
 ///
-/// No single version of leaf-lib satisfies both ^1.0.0 and ^2.0.0.
-/// The resolver encounters leaf-lib a second time via lib-b, calls
-/// validate_version_compatibility, and must reject with a version-conflict error.
+/// No single version of leaf-lib satisfies both ^1.0.0 and ^2.0.0. The resolver
+/// merges both requirements before picking and must report that the intersection
+/// is empty, listing every requirement it gathered.
 #[test]
-#[ignore = "re-enabled in Task 4 with updated error assertion"]
 fn fixture() {
     with_test_registry(|url| {
         let vfs = VirtualFileSystem::copy(crate::parent_directory!().join("in"));
@@ -195,9 +194,12 @@ fn fixture() {
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("version conflict for") || stderr.contains("leaf-lib"),
-            "error output should mention the version conflict, got:\n{}",
-            stderr
+            stderr.contains("no version of leaf-lib satisfies all requirements"),
+            "expected NoCompatibleVersion error mentioning leaf-lib, got:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("^1.0.0") && stderr.contains("^2.0.0"),
+            "error must list both incompatible requirements, got:\n{stderr}"
         );
     })
 }
