@@ -766,3 +766,189 @@ mod error_tests {
         assert!(msg.contains("<=1.2.0"), "msg: {msg}");
     }
 }
+
+#[cfg(test)]
+mod retraction_tests {
+    use super::*;
+
+    fn pkg(name: &str) -> PackageName {
+        PackageName::unchecked(name)
+    }
+
+    fn remote_source() -> DependencySource {
+        DependencySource::Remote {
+            registry: "http://example.test/artifactory".parse().unwrap(),
+            repository: "test-repo".to_string(),
+        }
+    }
+
+    fn node(name: &str, version: &str, dependencies: Vec<PackageName>) -> DependencyNode {
+        let resolved: Version = version.parse().unwrap();
+
+        DependencyNode {
+            name: pkg(name),
+            package_type: Some(PackageType::Lib),
+            source: remote_source(),
+            dependencies,
+            version: exact_req(&resolved),
+            resolved_version: Some(resolved),
+        }
+    }
+
+    /// Builds a graph state directly, bypassing any network access.
+    fn builder<'a>(
+        credentials: &'a Credentials,
+        edges: &[(&str, Option<&str>, &str)],
+        nodes: Vec<DependencyNode>,
+    ) -> GraphBuilder<'a> {
+        let mut builder = GraphBuilder::new(
+            PathBuf::from("/nonexistent"),
+            Some(PackageType::Lib),
+            credentials,
+            None,
+            NetworkMode::Offline,
+        );
+
+        for (name, from, req) in edges {
+            builder
+                .requirements
+                .entry(pkg(name))
+                .or_default()
+                .push(RequirementEdge {
+                    from: from.map(pkg),
+                    req: req.parse().unwrap(),
+                });
+            builder
+                .sources
+                .entry(pkg(name))
+                .or_insert_with(remote_source);
+        }
+
+        for node in nodes {
+            builder.nodes.insert(node.name.clone(), node);
+        }
+
+        builder
+    }
+
+    /// Dropping a package must transitively drop everything that was only
+    /// reachable through it, not just its immediate dependencies.
+    ///
+    ///   root -> a          (retracted)
+    ///   a    -> b          (b's only contributor)
+    ///   b    -> c          (c's only contributor)
+    #[test]
+    fn retraction_cascades_through_multiple_levels() {
+        let credentials = Credentials::default();
+        let mut builder = builder(
+            &credentials,
+            &[
+                ("a", None, "^1.0.0"),
+                ("b", Some("a"), "^1.0.0"),
+                ("c", Some("b"), "^1.0.0"),
+            ],
+            vec![
+                node("a", "1.5.0", vec![pkg("b")]),
+                node("b", "1.0.0", vec![pkg("c")]),
+                node("c", "1.0.0", vec![]),
+            ],
+        );
+
+        builder.retract_contributions_from(&pkg("a"));
+
+        assert!(
+            !builder.nodes.contains_key(&pkg("b")),
+            "b was only reachable via a and must be dropped"
+        );
+        assert!(
+            !builder.nodes.contains_key(&pkg("c")),
+            "c was only reachable via b and must cascade out too"
+        );
+        for name in ["b", "c"] {
+            assert!(!builder.requirements.contains_key(&pkg(name)));
+            assert!(!builder.sources.contains_key(&pkg(name)));
+        }
+
+        assert!(
+            builder.nodes.contains_key(&pkg("a")),
+            "the retracting package itself is left in place for its caller to replace"
+        );
+        assert!(
+            builder.requirements.contains_key(&pkg("a")),
+            "a's own requirement set must survive retraction"
+        );
+    }
+
+    /// A package that keeps a contributor survives, but must be rescheduled when
+    /// the shrunken requirement set no longer admits its current version.
+    #[test]
+    fn retraction_reschedules_survivor_whose_pick_no_longer_fits() {
+        let credentials = Credentials::default();
+        let mut builder = builder(
+            &credentials,
+            &[
+                ("a", None, "^1.0.0"),
+                ("other", None, "^1.0.0"),
+                // `shared` is required by both `a` (loosely) and `other` (tightly).
+                ("shared", Some("a"), "^1.0.0"),
+                ("shared", Some("other"), "<=1.2.0"),
+            ],
+            vec![
+                node("a", "1.5.0", vec![pkg("shared")]),
+                node("other", "1.0.0", vec![pkg("shared")]),
+                // Currently at 1.5.0, which only `a`'s requirement admits.
+                node("shared", "1.5.0", vec![]),
+            ],
+        );
+
+        builder.retract_contributions_from(&pkg("a"));
+
+        assert!(
+            builder.nodes.contains_key(&pkg("shared")),
+            "shared is still reachable via other and must not be dropped"
+        );
+        assert_eq!(
+            builder.requirements[&pkg("shared")].len(),
+            1,
+            "only a's edge is retracted"
+        );
+        assert!(
+            builder.worklist.contains(&pkg("shared")),
+            "1.5.0 no longer satisfies <=1.2.0, so shared must be re-resolved"
+        );
+    }
+
+    /// A survivor whose current version still satisfies the shrunken set is left
+    /// alone: retraction never re-optimizes upward.
+    #[test]
+    fn retraction_leaves_still_satisfied_survivor_alone() {
+        let credentials = Credentials::default();
+        let mut builder = builder(
+            &credentials,
+            &[
+                ("a", None, "^1.0.0"),
+                ("other", None, "^1.0.0"),
+                ("shared", Some("a"), "^1.0.0"),
+                ("shared", Some("other"), ">=1.0.0"),
+            ],
+            vec![
+                node("a", "1.5.0", vec![pkg("shared")]),
+                node("other", "1.0.0", vec![pkg("shared")]),
+                node("shared", "1.5.0", vec![]),
+            ],
+        );
+
+        builder.retract_contributions_from(&pkg("a"));
+
+        assert!(builder.nodes.contains_key(&pkg("shared")));
+        assert!(
+            !builder.worklist.contains(&pkg("shared")),
+            "1.5.0 still satisfies >=1.0.0, so no re-resolution is scheduled"
+        );
+        assert_eq!(
+            builder.nodes[&pkg("shared")].resolved_version,
+            Some(Version::new(1, 5, 0)),
+            "the existing pick is kept rather than re-optimized"
+        );
+    }
+}
