@@ -7,10 +7,8 @@ and repository name.
 ## Inline table syntax
 
 ```toml
-[dependencies.my-lib]
-version = "^1.0.0"
-registry = "https://my-registry.example.com"
-repository = "my-repo"
+[dependencies]
+my-package = { registry = "https://your.registry/artifactory", repository = "my-repo", version = "^1.0.0" }
 ```
 
 The three required fields for a remote dependency are:
@@ -60,8 +58,8 @@ You can depend on a package in a local directory (useful in monorepos or during
 development):
 
 ```toml
-[dependencies.my-lib]
-path = "../my-lib"
+[dependencies]
+my-lib = { path = "../my-lib" }
 ```
 
 The `path` field is a relative path from the manifest file to the dependency's
